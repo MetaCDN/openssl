@@ -269,12 +269,14 @@ void EVP_KEYMGMT_do_all_provided(OSSL_LIB_CTX *libctx,
                        (void (*)(void *))EVP_KEYMGMT_free);
 }
 
-void EVP_KEYMGMT_names_do_all(const EVP_KEYMGMT *keymgmt,
-                              void (*fn)(const char *name, void *data),
-                              void *data)
+int EVP_KEYMGMT_names_do_all(const EVP_KEYMGMT *keymgmt,
+                             void (*fn)(const char *name, void *data),
+                             void *data)
 {
     if (keymgmt->prov != NULL)
-        evp_names_do_all(keymgmt->prov, keymgmt->name_id, fn, data);
+        return evp_names_do_all(keymgmt->prov, keymgmt->name_id, fn, data);
+
+    return 1;
 }
 
 /*
@@ -338,7 +340,7 @@ const OSSL_PARAM *EVP_KEYMGMT_gen_settable_params(const EVP_KEYMGMT *keymgmt)
 
     if (keymgmt->gen_settable_params == NULL)
         return NULL;
-    return keymgmt->gen_settable_params(provctx);
+    return keymgmt->gen_settable_params(NULL, provctx);
 }
 
 void *evp_keymgmt_gen(const EVP_KEYMGMT *keymgmt, void *genctx,

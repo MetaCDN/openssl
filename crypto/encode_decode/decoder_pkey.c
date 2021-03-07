@@ -219,7 +219,7 @@ struct collect_decoder_data_st {
     STACK_OF(OPENSSL_CSTRING) *names;
     OSSL_DECODER_CTX *ctx;
 
-    unsigned int error_occured:1;
+    unsigned int error_occurred:1;
 };
 
 static void collect_decoder(OSSL_DECODER *decoder, void *arg)
@@ -229,10 +229,10 @@ static void collect_decoder(OSSL_DECODER *decoder, void *arg)
     const OSSL_PROVIDER *prov = OSSL_DECODER_provider(decoder);
     void *provctx = OSSL_PROVIDER_get0_provider_ctx(prov);
 
-    if (data->error_occured)
+    if (data->error_occurred)
         return;
 
-    data->error_occured = 1;         /* Assume the worst */
+    data->error_occurred = 1;         /* Assume the worst */
     if (data->names == NULL)
         return;
 
@@ -266,7 +266,7 @@ static void collect_decoder(OSSL_DECODER *decoder, void *arg)
         decoder->freectx(decoderctx);
     }
 
-    data->error_occured = 0;         /* All is good now */
+    data->error_occurred = 0;         /* All is good now */
 }
 
 int ossl_decoder_ctx_setup_for_pkey(OSSL_DECODER_CTX *ctx,
@@ -302,8 +302,12 @@ int ossl_decoder_ctx_setup_for_pkey(OSSL_DECODER_CTX *ctx,
          * If the key type is given by the caller, we only use the matching
          * KEYMGMTs, otherwise we use them all.
          */
-        if (keytype == NULL || EVP_KEYMGMT_is_a(keymgmt, keytype))
-            EVP_KEYMGMT_names_do_all(keymgmt, collect_name, names);
+        if (keytype == NULL || EVP_KEYMGMT_is_a(keymgmt, keytype)) {
+            if (!EVP_KEYMGMT_names_do_all(keymgmt, collect_name, names)) {
+                ERR_raise(ERR_LIB_OSSL_DECODER, ERR_R_INTERNAL_ERROR);
+                goto err;
+            }
+        }
 
         EVP_KEYMGMT_free(keymgmt);
     }
@@ -322,7 +326,7 @@ int ossl_decoder_ctx_setup_for_pkey(OSSL_DECODER_CTX *ctx,
                                      collect_decoder, &collect_decoder_data);
         sk_OPENSSL_CSTRING_free(names);
 
-        if (collect_decoder_data.error_occured)
+        if (collect_decoder_data.error_occurred)
             goto err;
     }
 
