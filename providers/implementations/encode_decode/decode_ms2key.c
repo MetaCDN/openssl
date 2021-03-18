@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2020-2021 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -30,7 +30,7 @@
 
 static EVP_PKEY *read_msblob(PROV_CTX *provctx, OSSL_CORE_BIO *cin, int *ispub)
 {
-    BIO *in = bio_new_from_core_bio(provctx, cin);
+    BIO *in = ossl_bio_new_from_core_bio(provctx, cin);
     EVP_PKEY *pkey = ossl_b2i_bio(in, ispub);
 
     BIO_free(in);
@@ -48,7 +48,7 @@ static EVP_PKEY *read_pvk(PROV_CTX *provctx, OSSL_CORE_BIO *cin,
     if (!ossl_pw_set_ossl_passphrase_cb(&pwdata, pw_cb, pw_cbarg))
         return NULL;
 
-    in = bio_new_from_core_bio(provctx, cin);
+    in = ossl_bio_new_from_core_bio(provctx, cin);
     pkey = b2i_PVK_bio(in, ossl_pw_pem_password, &pwdata);
     BIO_free(in);
 

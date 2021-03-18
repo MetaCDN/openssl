@@ -112,22 +112,22 @@ static void rsa_freedata(void *keydata)
 static int rsa_has(const void *keydata, int selection)
 {
     const RSA *rsa = keydata;
-    int ok = 0;
+    int ok = 1;
 
-    if (rsa != NULL && ossl_prov_is_running()) {
-        if ((selection & RSA_POSSIBLE_SELECTIONS) != 0)
-            ok = 1;
+    if (rsa == NULL || !ossl_prov_is_running())
+        return 0;
+    if ((selection & RSA_POSSIBLE_SELECTIONS) == 0)
+        return 1; /* the selection is not missing */
 
-        if ((selection & OSSL_KEYMGMT_SELECT_OTHER_PARAMETERS) != 0)
-            /* This will change with OAEP */
-            ok = ok && (RSA_test_flags(rsa, RSA_FLAG_TYPE_RSASSAPSS) != 0);
-        if ((selection & OSSL_KEYMGMT_SELECT_KEYPAIR) != 0)
-            ok = ok && (RSA_get0_e(rsa) != NULL);
-        if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0)
-            ok = ok && (RSA_get0_n(rsa) != NULL);
-        if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0)
-            ok = ok && (RSA_get0_d(rsa) != NULL);
-    }
+    if ((selection & OSSL_KEYMGMT_SELECT_OTHER_PARAMETERS) != 0)
+        /* This will change with OAEP */
+        ok = ok && (RSA_test_flags(rsa, RSA_FLAG_TYPE_RSASSAPSS) != 0);
+    if ((selection & OSSL_KEYMGMT_SELECT_KEYPAIR) != 0)
+        ok = ok && (RSA_get0_e(rsa) != NULL);
+    if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0)
+        ok = ok && (RSA_get0_n(rsa) != NULL);
+    if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0)
+        ok = ok && (RSA_get0_d(rsa) != NULL);
     return ok;
 }
 
@@ -164,8 +164,6 @@ static int rsa_import(void *keydata, int selection, const OSSL_PARAM params[])
 
     rsa_type = RSA_test_flags(rsa, RSA_FLAG_TYPE_MASK);
 
-    /* TODO(3.0) OAEP should bring on parameters as well */
-
     if ((selection & OSSL_KEYMGMT_SELECT_OTHER_PARAMETERS) != 0)
         ok = ok && pss_params_fromdata(ossl_rsa_get0_pss_params_30(rsa),
                                        &pss_defaults_set,
@@ -189,7 +187,8 @@ static int rsa_export(void *keydata, int selection,
     if (!ossl_prov_is_running() || rsa == NULL)
         return 0;
 
-    /* TODO(3.0) OAEP should bring on parameters */
+    if ((selection & RSA_POSSIBLE_SELECTIONS) == 0)
+        return 0;
 
     tmpl = OSSL_PARAM_BLD_new();
     if (tmpl == NULL)
@@ -362,13 +361,13 @@ static const OSSL_PARAM *rsa_gettable_params(void *provctx)
 static int rsa_validate(const void *keydata, int selection, int checktype)
 {
     const RSA *rsa = keydata;
-    int ok = 0;
+    int ok = 1;
 
     if (!ossl_prov_is_running())
         return 0;
 
-    if ((selection & RSA_POSSIBLE_SELECTIONS) != 0)
-        ok = 1;
+    if ((selection & RSA_POSSIBLE_SELECTIONS) == 0)
+        return 1; /* nothing to validate */
 
     /* If the whole key is selected, we do a pairwise validation */
     if ((selection & OSSL_KEYMGMT_SELECT_KEYPAIR)
@@ -417,7 +416,8 @@ static int rsa_gencb(int p, int n, BN_GENCB *cb)
     return gctx->cb(params, gctx->cbarg);
 }
 
-static void *gen_init(void *provctx, int selection, int rsa_type)
+static void *gen_init(void *provctx, int selection, int rsa_type,
+                      const OSSL_PARAM params[])
 {
     OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);
     struct rsa_gen_ctx *gctx = NULL;
@@ -441,17 +441,23 @@ static void *gen_init(void *provctx, int selection, int rsa_type)
             gctx->rsa_type = rsa_type;
         }
     }
+    if (!rsa_gen_set_params(gctx, params)) {
+        OPENSSL_free(gctx);
+        gctx = NULL;
+    }
     return gctx;
 }
 
-static void *rsa_gen_init(void *provctx, int selection)
+static void *rsa_gen_init(void *provctx, int selection,
+                          const OSSL_PARAM params[])
 {
-    return gen_init(provctx, selection, RSA_FLAG_TYPE_RSA);
+    return gen_init(provctx, selection, RSA_FLAG_TYPE_RSA, params);
 }
 
-static void *rsapss_gen_init(void *provctx, int selection)
+static void *rsapss_gen_init(void *provctx, int selection,
+                             const OSSL_PARAM params[])
 {
-    return gen_init(provctx, selection, RSA_FLAG_TYPE_RSASSAPSS);
+    return gen_init(provctx, selection, RSA_FLAG_TYPE_RSASSAPSS, params);
 }
 
 /*
@@ -463,6 +469,9 @@ static int rsa_gen_set_params(void *genctx, const OSSL_PARAM params[])
 {
     struct rsa_gen_ctx *gctx = genctx;
     const OSSL_PARAM *p;
+
+    if (params == NULL)
+        return 1;
 
     if ((p = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_RSA_BITS)) != NULL
         && !OSSL_PARAM_get_size_t(p, &gctx->nbits))
@@ -480,7 +489,7 @@ static int rsa_gen_set_params(void *genctx, const OSSL_PARAM params[])
         return 0;
 #if defined(FIPS_MODULE) && !defined(OPENSSL_NO_ACVP_TESTS)
     /* Any ACVP test related parameters are copied into a params[] */
-    if (!rsa_acvp_test_gen_params_new(&gctx->acvp_test_params, params))
+    if (!ossl_rsa_acvp_test_gen_params_new(&gctx->acvp_test_params, params))
         return 0;
 #endif
     return 1;
@@ -562,7 +571,7 @@ static void *rsa_gen(void *genctx, OSSL_CALLBACK *osslcb, void *cbarg)
 
 #if defined(FIPS_MODULE) && !defined(OPENSSL_NO_ACVP_TESTS)
     if (gctx->acvp_test_params != NULL) {
-        if (!rsa_acvp_test_set_params(rsa_tmp, gctx->acvp_test_params))
+        if (!ossl_rsa_acvp_test_set_params(rsa_tmp, gctx->acvp_test_params))
             goto err;
     }
 #endif
@@ -594,7 +603,7 @@ static void rsa_gen_cleanup(void *genctx)
     if (gctx == NULL)
         return;
 #if defined(FIPS_MODULE) && !defined(OPENSSL_NO_ACVP_TESTS)
-    rsa_acvp_test_gen_params_free(gctx->acvp_test_params);
+    ossl_rsa_acvp_test_gen_params_free(gctx->acvp_test_params);
     gctx->acvp_test_params = NULL;
 #endif
     BN_clear_free(gctx->pub_exp);

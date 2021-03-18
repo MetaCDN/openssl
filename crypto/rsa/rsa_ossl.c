@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2020 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2021 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -163,7 +163,8 @@ static BN_BLINDING *rsa_get_blinding(RSA *rsa, int *local, BN_CTX *ctx)
 {
     BN_BLINDING *ret;
 
-    CRYPTO_THREAD_write_lock(rsa->lock);
+    if (!CRYPTO_THREAD_write_lock(rsa->lock))
+        return NULL;
 
     if (rsa->blinding == NULL) {
         rsa->blinding = RSA_setup_blinding(rsa, ctx);

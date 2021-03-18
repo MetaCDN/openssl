@@ -158,7 +158,7 @@ static int eckey_pub_decode(EVP_PKEY *pkey, const X509_PUBKEY *pubkey)
     OSSL_LIB_CTX *libctx = NULL;
     const char *propq = NULL;
 
-    if (!X509_PUBKEY_get0_libctx(&libctx, &propq, pubkey)
+    if (!ossl_x509_PUBKEY_get0_libctx(&libctx, &propq, pubkey)
         || !X509_PUBKEY_get0_param(NULL, &p, &pklen, &palg, pubkey))
         return 0;
     X509_ALGOR_get0(NULL, &ptype, &pval, palg);
@@ -482,7 +482,10 @@ static int ec_pkey_ctrl(EVP_PKEY *pkey, int op, long arg1, void *arg2)
         return 1;
 
     case ASN1_PKEY_CTRL_SET1_TLS_ENCPT:
-        return EC_KEY_oct2key(EVP_PKEY_get0_EC_KEY(pkey), arg2, arg1, NULL);
+        /* We should only be here if we have a legacy key */
+        if (!ossl_assert(evp_pkey_is_legacy(pkey)))
+            return 0;
+        return EC_KEY_oct2key(evp_pkey_get0_EC_KEY_int(pkey), arg2, arg1, NULL);
 
     case ASN1_PKEY_CTRL_GET1_TLS_ENCPT:
         return EC_KEY_key2buf(EVP_PKEY_get0_EC_KEY(pkey),
@@ -705,7 +708,7 @@ static int ec_pkey_import_from(const OSSL_PARAM params[], void *vpctx)
     return 1;
 }
 
-const EVP_PKEY_ASN1_METHOD eckey_asn1_meth = {
+const EVP_PKEY_ASN1_METHOD ossl_eckey_asn1_meth = {
     EVP_PKEY_EC,
     EVP_PKEY_EC,
     0,
@@ -756,7 +759,7 @@ const EVP_PKEY_ASN1_METHOD eckey_asn1_meth = {
 };
 
 #if !defined(OPENSSL_NO_SM2)
-const EVP_PKEY_ASN1_METHOD sm2_asn1_meth = {
+const EVP_PKEY_ASN1_METHOD ossl_sm2_asn1_meth = {
    EVP_PKEY_SM2,
    EVP_PKEY_EC,
    ASN1_PKEY_ALIAS

@@ -281,24 +281,24 @@ static
 int ec_has(const void *keydata, int selection)
 {
     const EC_KEY *ec = keydata;
-    int ok = 0;
+    int ok = 1;
 
-    if (ossl_prov_is_running() && ec != NULL) {
-        if ((selection & EC_POSSIBLE_SELECTIONS) != 0)
-            ok = 1;
+    if (!ossl_prov_is_running() || ec == NULL)
+        return 0;
+    if ((selection & EC_POSSIBLE_SELECTIONS) == 0)
+        return 1; /* the selection is not missing */
 
-        if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0)
-            ok = ok && (EC_KEY_get0_public_key(ec) != NULL);
-        if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0)
-            ok = ok && (EC_KEY_get0_private_key(ec) != NULL);
-        if ((selection & OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS) != 0)
-            ok = ok && (EC_KEY_get0_group(ec) != NULL);
-        /*
-         * We consider OSSL_KEYMGMT_SELECT_OTHER_PARAMETERS to always be
-         * available, so no extra check is needed other than the previous one
-         * against EC_POSSIBLE_SELECTIONS.
-         */
-    }
+    if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0)
+        ok = ok && (EC_KEY_get0_public_key(ec) != NULL);
+    if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0)
+        ok = ok && (EC_KEY_get0_private_key(ec) != NULL);
+    if ((selection & OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS) != 0)
+        ok = ok && (EC_KEY_get0_group(ec) != NULL);
+    /*
+     * We consider OSSL_KEYMGMT_SELECT_OTHER_PARAMETERS to always be
+     * available, so no extra check is needed other than the previous one
+     * against EC_POSSIBLE_SELECTIONS.
+     */
     return ok;
 }
 
@@ -774,6 +774,9 @@ int ec_set_params(void *key, const OSSL_PARAM params[])
 
     if (key == NULL)
         return 0;
+    if (params == NULL)
+        return 1;
+
 
     if (!ossl_ec_group_set_params((EC_GROUP *)EC_KEY_get0_group(key), params))
         return 0;
@@ -838,7 +841,7 @@ static
 int sm2_validate(const void *keydata, int selection, int checktype)
 {
     const EC_KEY *eck = keydata;
-    int ok = 0;
+    int ok = 1;
     BN_CTX *ctx = NULL;
 
     if (!ossl_prov_is_running())
@@ -848,8 +851,8 @@ int sm2_validate(const void *keydata, int selection, int checktype)
     if  (ctx == NULL)
         return 0;
 
-    if ((selection & EC_POSSIBLE_SELECTIONS) != 0)
-        ok = 1;
+    if ((selection & EC_POSSIBLE_SELECTIONS) == 0)
+        return 1; /* nothing to validate */
 
     if ((selection & OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS) != 0)
         ok = ok && EC_GROUP_check(EC_KEY_get0_group(eck), ctx);
@@ -877,7 +880,7 @@ static
 int ec_validate(const void *keydata, int selection, int checktype)
 {
     const EC_KEY *eck = keydata;
-    int ok = 0;
+    int ok = 1;
     BN_CTX *ctx = NULL;
 
     if (!ossl_prov_is_running())
@@ -887,8 +890,8 @@ int ec_validate(const void *keydata, int selection, int checktype)
     if  (ctx == NULL)
         return 0;
 
-    if ((selection & EC_POSSIBLE_SELECTIONS) != 0)
-        ok = 1;
+    if ((selection & EC_POSSIBLE_SELECTIONS) == 0)
+        return 1; /* nothing to validate */
 
     if ((selection & OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS) != 0) {
         int flags = EC_KEY_get_flags(eck);
@@ -932,7 +935,8 @@ struct ec_gen_ctx {
     EC_GROUP *gen_group;
 };
 
-static void *ec_gen_init(void *provctx, int selection)
+static void *ec_gen_init(void *provctx, int selection,
+                         const OSSL_PARAM params[])
 {
     OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);
     struct ec_gen_ctx *gctx = NULL;
@@ -944,6 +948,10 @@ static void *ec_gen_init(void *provctx, int selection)
         gctx->libctx = libctx;
         gctx->selection = selection;
         gctx->ecdh_mode = 0;
+    }
+    if (!ec_gen_set_params(gctx, params)) {
+        OPENSSL_free(gctx);
+        gctx = NULL;
     }
     return gctx;
 }
