@@ -128,19 +128,19 @@ static void dh_freedata(void *keydata)
 static int dh_has(const void *keydata, int selection)
 {
     const DH *dh = keydata;
-    int ok = 0;
+    int ok = 1;
 
-    if (ossl_prov_is_running() && dh != NULL) {
-        if ((selection & DH_POSSIBLE_SELECTIONS) != 0)
-            ok = 1;
+    if (!ossl_prov_is_running() || dh == NULL)
+        return 0;
+    if ((selection & DH_POSSIBLE_SELECTIONS) == 0)
+        return 1; /* the selection is not missing */
 
-        if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0)
-            ok = ok && (DH_get0_pub_key(dh) != NULL);
-        if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0)
-            ok = ok && (DH_get0_priv_key(dh) != NULL);
-        if ((selection & OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS) != 0)
-            ok = ok && (DH_get0_p(dh) != NULL && DH_get0_g(dh) != NULL);
-    }
+    if ((selection & OSSL_KEYMGMT_SELECT_PUBLIC_KEY) != 0)
+        ok = ok && (DH_get0_pub_key(dh) != NULL);
+    if ((selection & OSSL_KEYMGMT_SELECT_PRIVATE_KEY) != 0)
+        ok = ok && (DH_get0_priv_key(dh) != NULL);
+    if ((selection & OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS) != 0)
+        ok = ok && (DH_get0_p(dh) != NULL && DH_get0_g(dh) != NULL);
     return ok;
 }
 
@@ -376,13 +376,13 @@ static int dh_validate_private(const DH *dh)
 static int dh_validate(const void *keydata, int selection, int checktype)
 {
     const DH *dh = keydata;
-    int ok = 0;
+    int ok = 1;
 
     if (!ossl_prov_is_running())
         return 0;
 
-    if ((selection & DH_POSSIBLE_SELECTIONS) != 0)
-        ok = 1;
+    if ((selection & DH_POSSIBLE_SELECTIONS) == 0)
+        return 1; /* nothing to validate */
 
     if ((selection & OSSL_KEYMGMT_SELECT_DOMAIN_PARAMETERS) != 0) {
         /*
@@ -408,7 +408,8 @@ static int dh_validate(const void *keydata, int selection, int checktype)
     return ok;
 }
 
-static void *dh_gen_init_base(void *provctx, int selection, int type)
+static void *dh_gen_init_base(void *provctx, int selection,
+                              const OSSL_PARAM params[], int type)
 {
     OSSL_LIB_CTX *libctx = PROV_LIBCTX_OF(provctx);
     struct dh_gen_ctx *gctx = NULL;
@@ -441,17 +442,23 @@ static void *dh_gen_init_base(void *provctx, int selection, int type)
         gctx->generator = DH_GENERATOR_2;
         gctx->dh_type = type;
     }
+    if (!dh_gen_set_params(gctx, params)) {
+        OPENSSL_free(gctx);
+        gctx = NULL;
+    }
     return gctx;
 }
 
-static void *dh_gen_init(void *provctx, int selection)
+static void *dh_gen_init(void *provctx, int selection,
+                         const OSSL_PARAM params[])
 {
-    return dh_gen_init_base(provctx, selection, DH_FLAG_TYPE_DH);
+    return dh_gen_init_base(provctx, selection, params, DH_FLAG_TYPE_DH);
 }
 
-static void *dhx_gen_init(void *provctx, int selection)
+static void *dhx_gen_init(void *provctx, int selection,
+                          const OSSL_PARAM params[])
 {
-   return dh_gen_init_base(provctx, selection, DH_FLAG_TYPE_DHX);
+   return dh_gen_init_base(provctx, selection, params, DH_FLAG_TYPE_DHX);
 }
 
 static int dh_gen_set_template(void *genctx, void *templ)
@@ -487,6 +494,9 @@ static int dh_gen_set_params(void *genctx, const OSSL_PARAM params[])
 
     if (gctx == NULL)
         return 0;
+    if (params == NULL)
+        return 1;
+
 
     p = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_FFC_TYPE);
     if (p != NULL) {

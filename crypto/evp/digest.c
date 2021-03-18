@@ -65,7 +65,6 @@ int EVP_MD_CTX_reset(EVP_MD_CTX *ctx)
         return 1;
 
 #ifndef FIPS_MODULE
-    /* TODO(3.0): Temporarily no support for EVP_DigestSign* in FIPS module */
     /*
      * pctx should be freed by the user of EVP_MD_CTX
      * if EVP_MD_CTX_FLAG_KEEP_PKEY_CTX is set
@@ -124,13 +123,8 @@ void EVP_MD_CTX_free(EVP_MD_CTX *ctx)
     return;
 }
 
-int EVP_DigestInit(EVP_MD_CTX *ctx, const EVP_MD *type)
-{
-    EVP_MD_CTX_reset(ctx);
-    return EVP_DigestInit_ex(ctx, type, NULL);
-}
-
-int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
+static int evp_md_init_internal(EVP_MD_CTX *ctx, const EVP_MD *type,
+                                const OSSL_PARAM params[], ENGINE *impl)
 {
 #if !defined(OPENSSL_NO_ENGINE) && !defined(FIPS_MODULE)
     ENGINE *tmpimpl = NULL;
@@ -272,7 +266,7 @@ int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
         return 0;
     }
 
-    return ctx->digest->dinit(ctx->provctx);
+    return ctx->digest->dinit(ctx->provctx, params);
 
     /* Code below to be removed when legacy support is dropped. */
  legacy:
@@ -327,10 +321,6 @@ int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
  skip_to_init:
 #endif
 #ifndef FIPS_MODULE
-    /*
-     * TODO(3.0): Temporarily no support for EVP_DigestSign* inside FIPS module
-     * or when using providers.
-     */
     if (ctx->pctx != NULL
             && (!EVP_PKEY_CTX_IS_SIGNATURE_OP(ctx->pctx)
                  || ctx->pctx->op.sig.signature == NULL)) {
@@ -344,6 +334,23 @@ int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
     if (ctx->flags & EVP_MD_CTX_FLAG_NO_INIT)
         return 1;
     return ctx->digest->init(ctx);
+}
+
+int EVP_DigestInit_ex2(EVP_MD_CTX *ctx, const EVP_MD *type,
+                       const OSSL_PARAM params[])
+{
+    return evp_md_init_internal(ctx, type, params, NULL);
+}
+
+int EVP_DigestInit(EVP_MD_CTX *ctx, const EVP_MD *type)
+{
+    EVP_MD_CTX_reset(ctx);
+    return evp_md_init_internal(ctx, type, NULL, NULL);
+}
+
+int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
+{
+    return evp_md_init_internal(ctx, type, NULL, impl);
 }
 
 int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count)
@@ -529,7 +536,6 @@ int EVP_MD_CTX_copy_ex(EVP_MD_CTX *out, const EVP_MD_CTX *in)
     /* copied EVP_MD_CTX should free the copied EVP_PKEY_CTX */
     EVP_MD_CTX_clear_flags(out, EVP_MD_CTX_FLAG_KEEP_PKEY_CTX);
 #ifndef FIPS_MODULE
-    /* TODO(3.0): Temporarily no support for EVP_DigestSign* in FIPS module */
     if (in->pctx != NULL) {
         out->pctx = EVP_PKEY_CTX_dup(in->pctx);
         if (out->pctx == NULL) {
@@ -586,7 +592,6 @@ int EVP_MD_CTX_copy_ex(EVP_MD_CTX *out, const EVP_MD_CTX *in)
     out->update = in->update;
 
 #ifndef FIPS_MODULE
-    /* TODO(3.0): Temporarily no support for EVP_DigestSign* in FIPS module */
     if (in->pctx) {
         out->pctx = EVP_PKEY_CTX_dup(in->pctx);
         if (!out->pctx) {
@@ -746,7 +751,6 @@ const OSSL_PARAM *EVP_MD_CTX_gettable_params(EVP_MD_CTX *ctx)
     return NULL;
 }
 
-/* TODO(3.0): Remove legacy code below - only used by engines & DigestSign */
 int EVP_MD_CTX_ctrl(EVP_MD_CTX *ctx, int cmd, int p1, void *p2)
 {
     int ret = EVP_CTRL_RET_UNSUPPORTED;
@@ -822,7 +826,6 @@ EVP_MD *evp_md_new(void)
  * NIDs or any functionality that use them.
  */
 #ifndef FIPS_MODULE
-/* TODO(3.x) get rid of the need for legacy NIDs */
 static void set_legacy_nid(const char *name, void *vlegacy_nid)
 {
     int nid;
@@ -889,7 +892,6 @@ static void *evp_md_from_dispatch(int name_id,
     }
 
 #ifndef FIPS_MODULE
-    /* TODO(3.x) get rid of the need for legacy NIDs */
     md->type = NID_undef;
     if (!evp_names_do_all(prov, name_id, set_legacy_nid, &md->type)
             || md->type == -1) {

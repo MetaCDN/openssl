@@ -72,17 +72,11 @@ void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX *ctx)
     OPENSSL_free(ctx);
 }
 
-int EVP_CipherInit(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
-                   const unsigned char *key, const unsigned char *iv, int enc)
-{
-    if (cipher != NULL)
-        EVP_CIPHER_CTX_reset(ctx);
-    return EVP_CipherInit_ex(ctx, cipher, NULL, key, iv, enc);
-}
-
-int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
-                      ENGINE *impl, const unsigned char *key,
-                      const unsigned char *iv, int enc)
+static int evp_cipher_init_internal(EVP_CIPHER_CTX *ctx,
+                                    const EVP_CIPHER *cipher,
+                                    ENGINE *impl, const unsigned char *key,
+                                    const unsigned char *iv, int enc,
+                                    const OSSL_PARAM params[])
 {
 #if !defined(OPENSSL_NO_ENGINE) && !defined(FIPS_MODULE)
     ENGINE *tmpimpl = NULL;
@@ -221,7 +215,8 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
                                               : EVP_CIPHER_CTX_key_length(ctx),
                                   iv,
                                   iv == NULL ? 0
-                                             : EVP_CIPHER_CTX_iv_length(ctx));
+                                             : EVP_CIPHER_CTX_iv_length(ctx),
+                                  params);
     }
 
     if (ctx->cipher->dinit == NULL) {
@@ -235,7 +230,8 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
                                           : EVP_CIPHER_CTX_key_length(ctx),
                               iv,
                               iv == NULL ? 0
-                                         : EVP_CIPHER_CTX_iv_length(ctx));
+                                         : EVP_CIPHER_CTX_iv_length(ctx),
+                                  params);
 
     /* Code below to be removed when legacy support is dropped. */
  legacy:
@@ -370,6 +366,28 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
     return 1;
 }
 
+int EVP_CipherInit_ex2(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
+                       const unsigned char *key, const unsigned char *iv,
+                       int enc, const OSSL_PARAM params[])
+{
+    return evp_cipher_init_internal(ctx, cipher, NULL, key, iv, enc, params);
+}
+
+int EVP_CipherInit(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
+                   const unsigned char *key, const unsigned char *iv, int enc)
+{
+    if (cipher != NULL)
+        EVP_CIPHER_CTX_reset(ctx);
+    return evp_cipher_init_internal(ctx, cipher, NULL, key, iv, enc, NULL);
+}
+
+int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
+                      ENGINE *impl, const unsigned char *key,
+                      const unsigned char *iv, int enc)
+{
+    return evp_cipher_init_internal(ctx, cipher, impl, key, iv, enc, NULL);
+}
+
 int EVP_CipherUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
                      const unsigned char *in, int inl)
 {
@@ -408,6 +426,13 @@ int EVP_EncryptInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
     return EVP_CipherInit_ex(ctx, cipher, impl, key, iv, 1);
 }
 
+int EVP_EncryptInit_ex2(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
+                        const unsigned char *key, const unsigned char *iv,
+                        const OSSL_PARAM params[])
+{
+    return EVP_CipherInit_ex2(ctx, cipher, key, iv, 1, params);
+}
+
 int EVP_DecryptInit(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
                     const unsigned char *key, const unsigned char *iv)
 {
@@ -419,6 +444,13 @@ int EVP_DecryptInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
                        const unsigned char *iv)
 {
     return EVP_CipherInit_ex(ctx, cipher, impl, key, iv, 0);
+}
+
+int EVP_DecryptInit_ex2(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
+                        const unsigned char *key, const unsigned char *iv,
+                        const OSSL_PARAM params[])
+{
+    return EVP_CipherInit_ex2(ctx, cipher, key, iv, 0, params);
 }
 
 /*
@@ -444,7 +476,7 @@ int EVP_DecryptInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
 # define PTRDIFF_T size_t
 #endif
 
-int is_partially_overlapping(const void *ptr1, const void *ptr2, int len)
+int ossl_is_partially_overlapping(const void *ptr1, const void *ptr2, int len)
 {
     PTRDIFF_T diff = (PTRDIFF_T)ptr1-(PTRDIFF_T)ptr2;
     /*
@@ -471,7 +503,7 @@ static int evp_EncryptDecryptUpdate(EVP_CIPHER_CTX *ctx,
 
     if (ctx->cipher->flags & EVP_CIPH_FLAG_CUSTOM_CIPHER) {
         /* If block size > 1 then the cipher will have to do this check */
-        if (bl == 1 && is_partially_overlapping(out, in, cmpl)) {
+        if (bl == 1 && ossl_is_partially_overlapping(out, in, cmpl)) {
             ERR_raise(ERR_LIB_EVP, EVP_R_PARTIALLY_OVERLAPPING);
             return 0;
         }
@@ -488,7 +520,7 @@ static int evp_EncryptDecryptUpdate(EVP_CIPHER_CTX *ctx,
         *outl = 0;
         return inl == 0;
     }
-    if (is_partially_overlapping(out + ctx->buf_len, in, cmpl)) {
+    if (ossl_is_partially_overlapping(out + ctx->buf_len, in, cmpl)) {
         ERR_raise(ERR_LIB_EVP, EVP_R_PARTIALLY_OVERLAPPING);
         return 0;
     }
@@ -753,7 +785,7 @@ int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
         cmpl = (cmpl + 7) / 8;
 
     if (ctx->cipher->flags & EVP_CIPH_FLAG_CUSTOM_CIPHER) {
-        if (b == 1 && is_partially_overlapping(out, in, cmpl)) {
+        if (b == 1 && ossl_is_partially_overlapping(out, in, cmpl)) {
             ERR_raise(ERR_LIB_EVP, EVP_R_PARTIALLY_OVERLAPPING);
             return 0;
         }
@@ -780,7 +812,7 @@ int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
     if (ctx->final_used) {
         /* see comment about PTRDIFF_T comparison above */
         if (((PTRDIFF_T)out == (PTRDIFF_T)in)
-            || is_partially_overlapping(out, in, b)) {
+            || ossl_is_partially_overlapping(out, in, b)) {
             ERR_raise(ERR_LIB_EVP, EVP_R_PARTIALLY_OVERLAPPING);
             return 0;
         }
